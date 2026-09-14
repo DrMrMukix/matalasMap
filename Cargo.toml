@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "rust",
+    "tools/svg_preprocessor"
+]
+resolver = "2"
