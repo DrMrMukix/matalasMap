@@ -114,6 +114,11 @@ public slots:
     bool undo();
     bool redo();
 
+    // Smooth stroke preview & async flag texture finalization
+    void beginStroke();
+    void endStroke();
+    bool isStrokeActive() const { return m_isStrokeActive; }
+
 signals:
     void worldNameChanged();
     void activeToolChanged();
@@ -135,14 +140,21 @@ private:
 
     WorldStateHandle m_world = nullptr;
     CountryListModel* m_countryModel = nullptr;
+    QImage m_masterWorldImage;
 
     QString m_worldName = "Tierra";
-    int m_activeTool = 0;      // 0: Brush, 1: Eraser, 2: Fill, 3: Picker, 4: Hand
-    int m_activeMode = 0;      // 0: Terrain, 1: Political
+    int m_activeTool = 0;       // 0: Brush, 1: Eraser, 2: Fill, 3: Picker, 4: Hand
+    int m_activeMode = 0;       // 0: Terrain, 1: Political
     int m_displayMode = 0;     // 0: FlatColor, 1: FlagPattern
     int m_brushRadius = 16;
     int m_activeCountryId = 0;
+
     bool m_isLoading = false;
     QString m_loadingMessage = "";
-    QImage m_masterWorldImage;
+
+    bool m_isStrokeActive = false;
+    int m_strokeDirtyMinX = 8192;
+    int m_strokeDirtyMinY = 4096;
+    int m_strokeDirtyMaxX = 0;
+    int m_strokeDirtyMaxY = 0;
 };

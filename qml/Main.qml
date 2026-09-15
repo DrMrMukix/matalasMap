@@ -89,9 +89,7 @@ Window {
             id: leftToolRail
             anchors.left: parent.left
             anchors.leftMargin: 12
-            y: root.uiVisible
-               ? Math.max(topBar.bottom + 12, (parent.height + topBar.height - height) / 2)
-               : (parent.height - height) / 2
+            anchors.verticalCenter: parent.verticalCenter
             z: 100
             visible: root.uiVisible
 

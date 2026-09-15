@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QFont>
 #include <QFontDatabase>
+#include <QQuickStyle>
 #include <QDebug>
 #include "bridge/WorldEditorBridge.h"
 #include "bridge/MapCanvasItem.h"
@@ -15,6 +16,9 @@
 
 int main(int argc, char *argv[])
 {
+    // Use Basic style across all platforms to support full control customization
+    QQuickStyle::setStyle("Basic");
+
     // Enable High-DPI scaling
     QGuiApplication app(argc, argv);
     app.setApplicationName("matalasMap");

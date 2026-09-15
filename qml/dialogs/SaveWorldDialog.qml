@@ -38,13 +38,17 @@ Dialog {
         radius: 24
         border.color: "#334155"
         border.width: 2
+        clip: true
 
         Rectangle {
             anchors.top: parent.top
+            anchors.topMargin: 4
             anchors.left: parent.left
+            anchors.leftMargin: 24
             anchors.right: parent.right
-            height: 5
-            radius: 2.5
+            anchors.rightMargin: 24
+            height: 4
+            radius: 2
             color: root.fileAlreadyExists ? "#F59E0B" : "#10B981"
             Behavior on color { ColorAnimation { duration: 150 } }
         }

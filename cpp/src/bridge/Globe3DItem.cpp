@@ -10,6 +10,8 @@
 #include <QDir>
 #include <QRadialGradient>
 #include <cmath>
+#include <thread>
+#include <vector>
 
 static const int WORLD_W = 8192;
 static const int WORLD_H = 4096;
@@ -222,70 +224,100 @@ void Globe3DItem::paint(QPainter* painter)
     if (worldImg.isNull()) return;
     const uchar* worldData = worldImg.constBits();
 
-    for (int sy = minY; sy <= maxY; ++sy) {
-        qreal dy = (sy - bcy);
-        qreal dy2 = dy * dy;
-        if (dy2 > (bR + 1.2) * (bR + 1.2)) continue;
+    auto renderSlice = [&](int startY, int endY) {
+        qreal edgeThresholdSq = (bR - 1.0) * (bR - 1.0);
+        qreal sphereOuterSq = (bR + 0.8) * (bR + 0.8);
 
-        qreal maxDx = std::sqrt(qMax(0.0, (bR + 1.2) * (bR + 1.2) - dy2));
-        int minX = qBound(0, (int)std::floor(bcx - maxDx), bufW - 1);
-        int maxX = qBound(0, (int)std::ceil(bcx + maxDx), bufW - 1);
+        for (int sy = startY; sy <= endY; ++sy) {
+            qreal dy = (sy - bcy);
+            qreal dy2 = dy * dy;
+            if (dy2 > (bR + 1.2) * (bR + 1.2)) continue;
 
-        QRgb* scanline = reinterpret_cast<QRgb*>(globeImage.scanLine(sy));
+            qreal maxDx = std::sqrt(qMax(0.0, (bR + 1.2) * (bR + 1.2) - dy2));
+            int minX = qBound(0, (int)std::floor(bcx - maxDx), bufW - 1);
+            int maxX = qBound(0, (int)std::ceil(bcx + maxDx), bufW - 1);
 
-        qreal vy = -dy * invBR;
-        qreal vy_cosP = vy * cosP;
-        qreal vy_sinP = vy * sinP;
-        qreal vy_ly = vy * ly;
+            QRgb* scanline = reinterpret_cast<QRgb*>(globeImage.scanLine(sy));
 
-        for (int sx = minX; sx <= maxX; ++sx) {
-            qreal dx = (sx - bcx);
-            qreal distSq = dx * dx + dy2;
-            if (distSq > (bR + 0.8) * (bR + 0.8)) continue;
+            qreal vy = -dy * invBR;
+            qreal vy_cosP = vy * cosP;
+            qreal vy_sinP = vy * sinP;
+            qreal vy_ly = vy * ly;
 
-            qreal dist = std::sqrt(distSq);
-            qreal edgeAlpha = (dist > bR - 1.0) ? qBound(0.0, (bR + 0.8 - dist) * 0.9, 1.0) : 1.0;
+            for (int sx = minX; sx <= maxX; ++sx) {
+                qreal dx = (sx - bcx);
+                qreal distSq = dx * dx + dy2;
+                if (distSq > sphereOuterSq) continue;
 
-            qreal dz = std::sqrt(qMax(0.0, 1.0 - (distSq / bR2)));
-            qreal vx = dx * invBR;
-            qreal vz = dz;
+                qreal edgeAlpha = 1.0;
+                if (distSq > edgeThresholdSq) {
+                    qreal dist = std::sqrt(distSq);
+                    edgeAlpha = qBound(0.0, (bR + 0.8 - dist) * 0.9, 1.0);
+                }
 
-            qreal py1 = vy_cosP - vz * sinP;
-            qreal pz1 = vy_sinP + vz * cosP;
+                qreal dz = std::sqrt(qMax(0.0, 1.0 - (distSq / bR2)));
+                qreal vx = dx * invBR;
+                qreal vz = dz;
 
-            qreal nx = vx * cosY + pz1 * sinY;
-            qreal ny = py1;
-            qreal nz = -vx * sinY + pz1 * cosY;
+                qreal py1 = vy_cosP - vz * sinP;
+                qreal pz1 = vy_sinP + vz * cosP;
 
-            qreal lat = std::asin(qBound(-1.0, ny, 1.0));
-            qreal lon = std::atan2(nx, nz);
+                qreal nx = vx * cosY + pz1 * sinY;
+                qreal ny = py1;
+                qreal nz = -vx * sinY + pz1 * cosY;
 
-            int wx = qBound(0, (int)std::floor(((lon + PI) / (2.0 * PI)) * WORLD_W), WORLD_W - 1);
-            int wy = qBound(0, (int)std::floor(((PI * 0.5 - lat) / PI) * WORLD_H), WORLD_H - 1);
+                qreal lat = std::asin(qBound(-1.0, ny, 1.0));
+                qreal lon = std::atan2(nx, nz);
 
-            int srcIdx = (wy * WORLD_W + wx) * 4;
-            uchar r = worldData[srcIdx];
-            uchar g = worldData[srcIdx + 1];
-            uchar b = worldData[srcIdx + 2];
+                int wx = qBound(0, (int)std::floor(((lon + PI) / (2.0 * PI)) * WORLD_W), WORLD_W - 1);
+                int wy = qBound(0, (int)std::floor(((PI * 0.5 - lat) / PI) * WORLD_H), WORLD_H - 1);
 
-            // 3D Lighting & atmosphere
-            qreal dotL = vx * lx + vy_ly + vz * lz;
-            qreal diffuse = qMax(0.0, dotL) * 0.42 + 0.58;
-            qreal rim = std::pow(1.0 - dz, 2.5) * 0.38;
+                int srcIdx = (wy * WORLD_W + wx) * 4;
+                uchar r = worldData[srcIdx];
+                uchar g = worldData[srcIdx + 1];
+                uchar b = worldData[srcIdx + 2];
 
-            // Subtle specular water shine
-            qreal spec = 0.0;
-            if (b > r + 15 && b > g) {
-                spec = std::pow(qMax(0.0, dotL), 12.0) * 0.25;
+                // 3D Lighting & atmosphere
+                qreal dotL = vx * lx + vy_ly + vz * lz;
+                qreal diffuse = qMax(0.0, dotL) * 0.42 + 0.58;
+                qreal rim = std::pow(1.0 - dz, 2.5) * 0.38;
+
+                // Subtle specular water shine
+                qreal spec = 0.0;
+                if (b > r + 15 && b > g) {
+                    spec = std::pow(qMax(0.0, dotL), 12.0) * 0.25;
+                }
+
+                int finalR = qBound(0, (int)((r * diffuse + rim * 80 + spec * 220) * edgeAlpha), 255);
+                int finalG = qBound(0, (int)((g * diffuse + rim * 150 + spec * 240) * edgeAlpha), 255);
+                int finalB = qBound(0, (int)((b * diffuse + rim * 255 + spec * 255) * edgeAlpha), 255);
+                int finalA = qBound(0, (int)(255 * edgeAlpha), 255);
+
+                scanline[sx] = qRgba(finalR, finalG, finalB, finalA);
             }
-
-            int finalR = qBound(0, (int)((r * diffuse + rim * 80 + spec * 220) * edgeAlpha), 255);
-            int finalG = qBound(0, (int)((g * diffuse + rim * 150 + spec * 240) * edgeAlpha), 255);
-            int finalB = qBound(0, (int)((b * diffuse + rim * 255 + spec * 255) * edgeAlpha), 255);
-            int finalA = qBound(0, (int)(255 * edgeAlpha), 255);
-
-            scanline[sx] = qRgba(finalR, finalG, finalB, finalA);
         }
+    };
+
+    int totalLines = maxY - minY + 1;
+    unsigned int hardwareThreads = std::thread::hardware_concurrency();
+    unsigned int numThreads = hardwareThreads > 0 ? hardwareThreads : 4;
+
+    if (numThreads > 1 && totalLines > 16) {
+        std::vector<std::thread> workers;
+        workers.reserve(numThreads);
+        int linesPerThread = (totalLines + numThreads - 1) / numThreads;
+        for (unsigned int t = 0; t < numThreads; ++t) {
+            int tMinY = minY + t * linesPerThread;
+            int tMaxY = std::min(maxY, tMinY + linesPerThread - 1);
+            if (tMinY <= tMaxY) {
+                workers.emplace_back(renderSlice, tMinY, tMaxY);
+            }
+        }
+        for (auto& w : workers) {
+            if (w.joinable()) w.join();
+        }
+    } else {
+        renderSlice(minY, maxY);
     }
 
     // Draw the viewport buffer directly onto the widget with nearest-neighbor crispness
@@ -323,6 +355,7 @@ void Globe3DItem::mousePressEvent(QMouseEvent* event)
         } else {
             m_isPainting = true;
             m_lastWorldPos = QPoint(wx, wy);
+            m_bridge->beginStroke();
             m_bridge->paintAt(wx, wy);
         }
         event->accept();
@@ -417,6 +450,9 @@ void Globe3DItem::mouseReleaseEvent(QMouseEvent* event)
         update(); // High-quality re-render upon release
         event->accept();
     } else if (event->button() == Qt::LeftButton) {
+        if (m_isPainting && m_bridge) {
+            m_bridge->endStroke();
+        }
         m_isPainting = false;
         event->accept();
     }
@@ -500,6 +536,7 @@ void Globe3DItem::touchEvent(QTouchEvent* event)
                 } else {
                     m_isPainting = true;
                     m_lastWorldPos = QPoint(wx, wy);
+                    m_bridge->beginStroke();
                     m_bridge->paintAt(wx, wy);
                 }
                 event->accept();
@@ -539,6 +576,9 @@ void Globe3DItem::touchEvent(QTouchEvent* event)
             if (m_isRotating) {
                 m_isRotating = false;
                 update();
+            }
+            if (m_isPainting && m_bridge) {
+                m_bridge->endStroke();
             }
             m_isPainting = false;
             m_pinchActive = false;

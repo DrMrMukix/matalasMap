@@ -23,14 +23,18 @@ Rectangle {
     color: "#0F172A"
     border.color: "#334155"
     border.width: 1.5
+    clip: true
 
-    // Top subtle gradient bar
+    // Top subtle gradient bar (inset inside rounded frame)
     Rectangle {
         anchors.top: parent.top
+        anchors.topMargin: 4
         anchors.left: parent.left
+        anchors.leftMargin: 24
         anchors.right: parent.right
-        height: 5
-        radius: 2.5
+        anchors.rightMargin: 24
+        height: 4
+        radius: 2
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop { position: 0.0; color: "#38BDF8" }
@@ -355,21 +359,27 @@ Rectangle {
                 spacing: 8
 
                 // Toggle Header
-                RowLayout {
+                Item {
                     Layout.fillWidth: true
+                    implicitHeight: toggleHeaderRow.implicitHeight
 
-                    Text {
-                        text: "+ Inventar Nueva Nación"
-                        font.pixelSize: 12
-                        font.bold: true
-                        color: "#38BDF8"
-                        Layout.fillWidth: true
-                    }
+                    RowLayout {
+                        id: toggleHeaderRow
+                        anchors.fill: parent
 
-                    Text {
-                        text: creatorBox.isExpanded ? "▲" : "▼"
-                        font.pixelSize: 11
-                        color: "#94A3B8"
+                        Text {
+                            text: "+ Inventar Nueva Nación"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: "#38BDF8"
+                            Layout.fillWidth: true
+                        }
+
+                        Text {
+                            text: creatorBox.isExpanded ? "▲" : "▼"
+                            font.pixelSize: 11
+                            color: "#94A3B8"
+                        }
                     }
 
                     MouseArea {

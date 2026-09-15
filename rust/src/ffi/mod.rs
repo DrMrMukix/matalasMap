@@ -436,6 +436,9 @@ pub unsafe extern "C" fn matalas_world_get_country_info(
     if world.is_null() || out_info.is_null() {
         return false;
     }
+    if (*world).stats_dirty {
+        (*world).recompute_country_pixel_counts();
+    }
     let countries = &(*world).countries;
     if index >= countries.len() {
         return false;

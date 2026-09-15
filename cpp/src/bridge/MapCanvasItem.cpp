@@ -255,11 +255,33 @@ void MapCanvasItem::paint(QPainter* painter)
 
 void MapCanvasItem::onRegionDirty(int minX, int minY, int maxX, int maxY)
 {
-    Q_UNUSED(minX);
-    Q_UNUSED(minY);
-    Q_UNUSED(maxX);
-    Q_UNUSED(maxY);
-    update();
+    if (width() <= 0 || height() <= 0) {
+        update();
+        return;
+    }
+    qreal scaledW = WORLD_W * m_zoom;
+    if (scaledW <= 0) {
+        update();
+        return;
+    }
+
+    // Since map repeats horizontally across the viewport, compute all visible instances
+    int k_start = (int)std::floor((0.0 - m_panX) / scaledW);
+    int k_end = (int)std::floor((width() - m_panX) / scaledW);
+
+    for (int k = k_start; k <= k_end; ++k) {
+        qreal tileLeft = m_panX + k * scaledW;
+        qreal sx0 = tileLeft + minX * m_zoom;
+        qreal sy0 = m_panY + minY * m_zoom;
+        qreal sx1 = tileLeft + (maxX + 1) * m_zoom;
+        qreal sy1 = m_panY + (maxY + 1) * m_zoom;
+
+        QRectF dirtyScreen(sx0 - 4, sy0 - 4, (sx1 - sx0) + 8, (sy1 - sy0) + 8);
+        QRectF clipped = dirtyScreen.intersected(QRectF(0, 0, width(), height()));
+        if (!clipped.isEmpty()) {
+            update(clipped.toAlignedRect());
+        }
+    }
 }
 
 void MapCanvasItem::onWorldLoaded()
@@ -298,6 +320,7 @@ void MapCanvasItem::mousePressEvent(QMouseEvent* event)
         } else if (tool == WorldEditorBridge::Brush || tool == WorldEditorBridge::Eraser) {
             m_isPainting = true;
             m_lastWorldPos = QPoint(wx, wy);
+            m_bridge->beginStroke();
             m_bridge->paintAt(wx, wy);
         }
         event->accept();
@@ -366,7 +389,12 @@ void MapCanvasItem::mouseReleaseEvent(QMouseEvent* event)
         }
         event->accept();
     } else if (event->button() == Qt::LeftButton) {
-        m_isPainting = false;
+        if (m_isPainting) {
+            m_isPainting = false;
+            if (m_bridge) {
+                m_bridge->endStroke();
+            }
+        }
         event->accept();
     }
 }
@@ -489,6 +517,7 @@ void MapCanvasItem::touchEvent(QTouchEvent* event)
                 } else {
                     m_isPainting = true;
                     m_lastWorldPos = QPoint(wx, wy);
+                    m_bridge->beginStroke();
                     m_bridge->paintAt(wx, wy);
                 }
                 event->accept();
@@ -536,7 +565,12 @@ void MapCanvasItem::touchEvent(QTouchEvent* event)
             }
         } else if (event->type() == QEvent::TouchEnd || event->type() == QEvent::TouchCancel) {
             m_isPanning = false;
-            m_isPainting = false;
+            if (m_isPainting) {
+                m_isPainting = false;
+                if (m_bridge) {
+                    m_bridge->endStroke();
+                }
+            }
             m_pinchActive = false;
             event->accept();
             return;

@@ -31,6 +31,7 @@ pub struct WorldState {
     pub component_boxes: Vec<(CountryId, u32, u32, u32, u32)>,
     pub country_bounds: HashMap<CountryId, (u32, u32, u32, u32)>,
     pub components_dirty: bool,
+    pub stats_dirty: bool,
 }
 
 impl WorldState {
@@ -54,6 +55,7 @@ impl WorldState {
             component_boxes: Vec::new(),
             country_bounds: HashMap::new(),
             components_dirty: true,
+            stats_dirty: true,
         }
     }
 
@@ -78,7 +80,21 @@ impl WorldState {
             component_boxes: Vec::new(),
             country_bounds: HashMap::new(),
             components_dirty: true,
+            stats_dirty: true,
         })
+    }
+
+    pub fn recompute_country_pixel_counts(&mut self) {
+        let mut counts: HashMap<CountryId, u64> = HashMap::new();
+        for &cid in &self.political.data {
+            if cid != 0 {
+                *counts.entry(cid).or_insert(0) += 1;
+            }
+        }
+        for c in &mut self.countries {
+            c.pixel_count = counts.get(&c.id).copied().unwrap_or(0);
+        }
+        self.stats_dirty = false;
     }
 
     pub fn set_country_flag_rgba(&mut self, country_id: CountryId, width: u32, height: u32, data: Vec<u8>) {
@@ -214,6 +230,7 @@ impl WorldState {
         self.next_country_id += 1;
         self.countries.push(Country::new(id, name, color));
         self.active_country_id = id;
+        self.stats_dirty = true;
         id
     }
 
@@ -256,6 +273,7 @@ impl WorldState {
 
         if found {
             self.components_dirty = true;
+            self.stats_dirty = true;
             Some(Rect::new(min_x, min_y, max_x, max_y))
         } else {
             None
@@ -295,6 +313,7 @@ impl WorldState {
                 let only_land = target_country != 0;
                 self.political.paint_circle(x, y, radius, target_country, &self.terrain, only_land);
                 self.components_dirty = true;
+                self.stats_dirty = true;
                 Some(rect)
             }
         }
@@ -326,6 +345,7 @@ impl WorldState {
                 }
                 if let Some(rect) = self.political.flood_fill(x, y, target_country, &self.terrain, true) {
                     self.components_dirty = true;
+                    self.stats_dirty = true;
                     Some(rect)
                 } else {
                     None
@@ -336,11 +356,13 @@ impl WorldState {
 
     pub fn undo(&mut self) -> Option<(Rect, EditorMode)> {
         self.components_dirty = true;
+        self.stats_dirty = true;
         self.undo_manager.undo(&mut self.terrain, &mut self.political)
     }
 
     pub fn redo(&mut self) -> Option<(Rect, EditorMode)> {
         self.components_dirty = true;
+        self.stats_dirty = true;
         self.undo_manager.redo(&mut self.terrain, &mut self.political)
     }
 
@@ -429,24 +451,42 @@ impl WorldState {
                                 self.country_bounds.get(&country_id).copied().unwrap_or((x, y, x, y))
                             };
 
-                            let bw = (bx1.saturating_sub(bx0) + 1).max(1) as f32;
+                            let mid_y = (by0 + by1) as f32 * 0.5;
+                            let center_lat = (std::f32::consts::PI * 0.5) - (mid_y * std::f32::consts::PI / (self.height as f32));
+                            let cos_lat = center_lat.cos().abs().max(0.18);
+
+                            let mut raw_bw = (bx1.saturating_sub(bx0) + 1) as f32;
+                            if raw_bw > (self.width as f32) * 0.5 {
+                                raw_bw = (self.width as f32) - raw_bw;
+                            }
+                            let eff_bw = (raw_bw * cos_lat).max(1.0);
                             let bh = (by1.saturating_sub(by0) + 1).max(1) as f32;
                             let aspect_flag = *flag_w as f32 / *flag_h as f32;
-                            let aspect_box = bw / bh;
+                            let aspect_box = eff_bw / bh;
+
+                            let mid_x = (bx0 + bx1) as f32 * 0.5;
+                            let mut dx = (x as f32) - mid_x;
+                            if dx > (self.width as f32) * 0.5 {
+                                dx -= self.width as f32;
+                            } else if dx < -(self.width as f32) * 0.5 {
+                                dx += self.width as f32;
+                            }
+                            let metric_dx = dx * cos_lat;
 
                             let (u, v) = if aspect_box > aspect_flag {
-                                let u = (x.saturating_sub(bx0)) as f32 / bw;
-                                let eff_h = bw / aspect_flag;
-                                let top_y = ((by0 + by1) as f32 - eff_h) * 0.5;
-                                let v = ((y as f32 - top_y) / eff_h).clamp(0.0, 1.0);
+                                let u = (metric_dx / eff_bw) + 0.5;
+                                let eff_h = eff_bw / aspect_flag;
+                                let v = ((y as f32 - mid_y) / eff_h) + 0.5;
                                 (u, v)
                             } else {
-                                let v = (y.saturating_sub(by0)) as f32 / bh;
                                 let eff_w = bh * aspect_flag;
-                                let left_x = ((bx0 + bx1) as f32 - eff_w) * 0.5;
-                                let u = ((x as f32 - left_x) / eff_w).clamp(0.0, 1.0);
+                                let u = (metric_dx / eff_w) + 0.5;
+                                let v = ((y as f32 - mid_y) / bh) + 0.5;
                                 (u, v)
                             };
+
+                            let u = u.clamp(0.0, 1.0);
+                            let v = v.clamp(0.0, 1.0);
 
                             let fx = ((u * (*flag_w - 1) as f32) as usize).min(*flag_w as usize - 1);
                             let fy = ((v * (*flag_h - 1) as f32) as usize).min(*flag_h as usize - 1);
@@ -519,6 +559,7 @@ impl WorldState {
             component_boxes: Vec::new(),
             country_bounds: HashMap::new(),
             components_dirty: true,
+            stats_dirty: false,
         };
         for c in &world.countries {
             if !c.flag_path.is_empty() {
@@ -531,6 +572,7 @@ impl WorldState {
                 }
             }
         }
+        world.recompute_country_pixel_counts();
         Ok(world)
     }
 

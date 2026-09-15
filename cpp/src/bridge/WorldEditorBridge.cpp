@@ -556,50 +556,64 @@ void WorldEditorBridge::rasterizeAndSendFlagToRust(int id, const QString& flagPa
         cleanPath = QUrl(cleanPath).toLocalFile();
     }
 
-    QString stripped = cleanPath.startsWith("assets/") ? cleanPath.mid(7) : cleanPath;
+    // Prioritize SVG: if path is .png, check if matching .svg exists
+    QString svgCandidate = cleanPath;
+    if (svgCandidate.endsWith(".png", Qt::CaseInsensitive)) {
+        svgCandidate.chop(4);
+        svgCandidate += ".svg";
+    }
 
-    QStringList candidates = {
-        cleanPath,
-        "assets:/" + cleanPath,
-        "assets:/assets/" + stripped,
-        "assets:/" + stripped,
-        QDir(QCoreApplication::applicationDirPath()).filePath(cleanPath),
-        QDir(QCoreApplication::applicationDirPath() + "/assets").filePath(stripped),
-        QDir(QCoreApplication::applicationDirPath() + "/../../..").filePath(cleanPath),
-        QDir(QCoreApplication::applicationDirPath() + "/../..").filePath(cleanPath),
-        QDir::current().filePath(cleanPath),
-        "C:/Users/marti/Documents/matalasMap/" + cleanPath
+    auto tryLoadData = [](const QString& path, QByteArray& outData) -> bool {
+        QString stripped = path.startsWith("assets/") ? path.mid(7) : path;
+        QStringList candidates = {
+            path,
+            "assets:/" + path,
+            "assets:/assets/" + stripped,
+            "assets:/" + stripped,
+            QDir(QCoreApplication::applicationDirPath()).filePath(path),
+            QDir(QCoreApplication::applicationDirPath() + "/assets").filePath(stripped),
+            QDir(QCoreApplication::applicationDirPath() + "/../../..").filePath(path),
+            QDir(QCoreApplication::applicationDirPath() + "/../..").filePath(path),
+            QDir::current().filePath(path),
+            "C:/Users/marti/Documents/matalasMap/" + path
+        };
+        for (const QString& cand : candidates) {
+            QFile f(cand);
+            if (f.exists() && f.open(QIODevice::ReadOnly)) {
+                outData = f.readAll();
+                f.close();
+                if (!outData.isEmpty()) return true;
+            }
+        }
+        return false;
     };
 
     QByteArray data;
-    bool found = false;
-    for (const QString& candidate : candidates) {
-        QFile f(candidate);
-        if (f.exists() && f.open(QIODevice::ReadOnly)) {
-            data = f.readAll();
-            f.close();
-            if (!data.isEmpty()) {
-                found = true;
-                break;
-            }
-        }
+    bool isSvg = false;
+    if (tryLoadData(svgCandidate, data)) {
+        isSvg = true;
+    } else if (tryLoadData(cleanPath, data)) {
+        isSvg = cleanPath.endsWith(".svg", Qt::CaseInsensitive);
+    } else {
+        return;
     }
 
-    if (!found || data.isEmpty()) return;
-
-    QImage img(256, 170, QImage::Format_RGBA8888);
+    int targetW = 512;
+    int targetH = 340;
+    QImage img(targetW, targetH, QImage::Format_RGBA8888);
     img.fill(Qt::transparent);
 
-    if (cleanPath.endsWith(".svg", Qt::CaseInsensitive)) {
+    if (isSvg) {
         QSvgRenderer renderer(data);
         if (renderer.isValid()) {
             QPainter painter(&img);
-            renderer.render(&painter, QRectF(0, 0, 256, 170));
+            painter.setRenderHint(QPainter::Antialiasing, true);
+            renderer.render(&painter, QRectF(0, 0, targetW, targetH));
         }
     } else {
         QImage loaded;
         if (loaded.loadFromData(data)) {
-            img = loaded.scaled(256, 170, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGBA8888);
+            img = loaded.scaled(targetW, targetH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGBA8888);
         }
     }
 
@@ -667,12 +681,56 @@ bool WorldEditorBridge::deleteCountry(int id)
     return ok;
 }
 
+void WorldEditorBridge::beginStroke()
+{
+    m_isStrokeActive = true;
+    m_strokeDirtyMinX = 8192;
+    m_strokeDirtyMinY = 4096;
+    m_strokeDirtyMaxX = 0;
+    m_strokeDirtyMaxY = 0;
+
+    // In flag mode: switch temporarily to FlatColor for fluid 60+ FPS preview
+    if (m_displayMode == 1 && m_world) {
+        matalas_world_set_display_mode(m_world, 0); // FlatColor
+    }
+}
+
+void WorldEditorBridge::endStroke()
+{
+    if (!m_isStrokeActive) return;
+    m_isStrokeActive = false;
+
+    if (m_displayMode == 1 && m_world) {
+        // Restore FlagPattern mode in Rust and re-render the final textured flags
+        matalas_world_set_display_mode(m_world, 1);
+        if (m_strokeDirtyMaxX >= m_strokeDirtyMinX && m_strokeDirtyMaxY >= m_strokeDirtyMinY) {
+            int pad = 32;
+            int rMinX = qMax(0, m_strokeDirtyMinX - pad);
+            int rMinY = qMax(0, m_strokeDirtyMinY - pad);
+            int rMaxX = qMin(8191, m_strokeDirtyMaxX + pad);
+            int rMaxY = qMin(4095, m_strokeDirtyMaxY + pad);
+            renderRegionToMaster(rMinX, rMinY, rMaxX, rMaxY);
+            emit regionDirty(rMinX, rMinY, rMaxX, rMaxY);
+        }
+    }
+
+    if (m_countryModel) {
+        m_countryModel->syncFromWorld(m_world, m_activeCountryId);
+    }
+}
+
 bool WorldEditorBridge::paintAt(int x, int y)
 {
     if (!m_world || m_activeTool == Hand) return false;
     FfiRect dirty;
     bool ok = matalas_world_paint_at(m_world, x, y, &dirty);
     if (ok) {
+        if (m_isStrokeActive) {
+            m_strokeDirtyMinX = qMin(m_strokeDirtyMinX, (int)dirty.min_x);
+            m_strokeDirtyMinY = qMin(m_strokeDirtyMinY, (int)dirty.min_y);
+            m_strokeDirtyMaxX = qMax(m_strokeDirtyMaxX, (int)dirty.max_x);
+            m_strokeDirtyMaxY = qMax(m_strokeDirtyMaxY, (int)dirty.max_y);
+        }
         renderRegionToMaster(dirty.min_x, dirty.min_y, dirty.max_x, dirty.max_y);
         emit regionDirty(dirty.min_x, dirty.min_y, dirty.max_x, dirty.max_y);
         updateUndoState();
@@ -689,6 +747,9 @@ bool WorldEditorBridge::fillAt(int x, int y)
         renderRegionToMaster(dirty.min_x, dirty.min_y, dirty.max_x, dirty.max_y);
         emit regionDirty(dirty.min_x, dirty.min_y, dirty.max_x, dirty.max_y);
         updateUndoState();
+        if (m_countryModel) {
+            m_countryModel->syncFromWorld(m_world, m_activeCountryId);
+        }
     }
     return ok;
 }
@@ -714,6 +775,9 @@ bool WorldEditorBridge::undo()
         renderRegionToMaster(dirty.min_x, dirty.min_y, dirty.max_x, dirty.max_y);
         emit regionDirty(dirty.min_x, dirty.min_y, dirty.max_x, dirty.max_y);
         updateUndoState();
+        if (m_countryModel) {
+            m_countryModel->syncFromWorld(m_world, m_activeCountryId);
+        }
     }
     return ok;
 }
@@ -728,6 +792,9 @@ bool WorldEditorBridge::redo()
         renderRegionToMaster(dirty.min_x, dirty.min_y, dirty.max_x, dirty.max_y);
         emit regionDirty(dirty.min_x, dirty.min_y, dirty.max_x, dirty.max_y);
         updateUndoState();
+        if (m_countryModel) {
+            m_countryModel->syncFromWorld(m_world, m_activeCountryId);
+        }
     }
     return ok;
 }

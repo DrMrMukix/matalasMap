@@ -40,7 +40,7 @@ Rectangle {
             radius: 14
             color: (worldEditor.activeTool === 0)
                    ? ((worldEditor.activeMode === 0) ? "#059669" : "#2563EB")
-                   : (maDraw.pressed ? "#1E293B" : (maDraw.containsMouse ? "#1E293B88" : "transparent"))
+                   : (maDraw.pressed ? "#334155" : (maDraw.containsMouse ? "#27354A" : "#1E293B"))
             border.color: (worldEditor.activeTool === 0) ? "#6EE7B7" : "#334155"
             border.width: (worldEditor.activeTool === 0) ? 2 : 1
 
@@ -70,7 +70,7 @@ Rectangle {
             radius: 14
             color: (worldEditor.activeTool === 1)
                    ? "#DC2626"
-                   : (maErase.pressed ? "#1E293B" : (maErase.containsMouse ? "#1E293B88" : "transparent"))
+                   : (maErase.pressed ? "#334155" : (maErase.containsMouse ? "#27354A" : "#1E293B"))
             border.color: (worldEditor.activeTool === 1) ? "#FCA5A5" : "#334155"
             border.width: (worldEditor.activeTool === 1) ? 2 : 1
 
@@ -100,7 +100,7 @@ Rectangle {
             radius: 14
             color: (worldEditor.activeTool === 2)
                    ? "#D97706"
-                   : (maFill.pressed ? "#1E293B" : (maFill.containsMouse ? "#1E293B88" : "transparent"))
+                   : (maFill.pressed ? "#334155" : (maFill.containsMouse ? "#27354A" : "#1E293B"))
             border.color: (worldEditor.activeTool === 2) ? "#FDE68A" : "#334155"
             border.width: (worldEditor.activeTool === 2) ? 2 : 1
 
@@ -130,7 +130,7 @@ Rectangle {
             radius: 14
             color: (worldEditor.activeTool === 3)
                    ? "#7C3AED"
-                   : (maPicker.pressed ? "#1E293B" : (maPicker.containsMouse ? "#1E293B88" : "transparent"))
+                   : (maPicker.pressed ? "#334155" : (maPicker.containsMouse ? "#27354A" : "#1E293B"))
             border.color: (worldEditor.activeTool === 3) ? "#C4B5FD" : "#334155"
             border.width: (worldEditor.activeTool === 3) ? 2 : 1
 
@@ -160,7 +160,7 @@ Rectangle {
             radius: 14
             color: (worldEditor.activeTool === 4)
                    ? "#0D9488"
-                   : (maHand.pressed ? "#1E293B" : (maHand.containsMouse ? "#1E293B88" : "transparent"))
+                   : (maHand.pressed ? "#334155" : (maHand.containsMouse ? "#27354A" : "#1E293B"))
             border.color: (worldEditor.activeTool === 4) ? "#99F6E4" : "#334155"
             border.width: (worldEditor.activeTool === 4) ? 2 : 1
 
@@ -252,8 +252,10 @@ Rectangle {
             Layout.preferredWidth: 50
             Layout.preferredHeight: 44
             radius: 12
-            color: maUndo.pressed ? "#334155" : "transparent"
-            opacity: worldEditor.canUndo ? 1.0 : 0.35
+            color: maUndo.pressed ? "#334155" : (maUndo.containsMouse ? "#27354A" : "#1E293B")
+            border.color: "#334155"
+            border.width: 1
+            opacity: worldEditor.canUndo ? 1.0 : 0.4
 
             Text {
                 anchors.centerIn: parent
@@ -278,8 +280,10 @@ Rectangle {
             Layout.preferredWidth: 50
             Layout.preferredHeight: 44
             radius: 12
-            color: maRedo.pressed ? "#334155" : "transparent"
-            opacity: worldEditor.canRedo ? 1.0 : 0.35
+            color: maRedo.pressed ? "#334155" : (maRedo.containsMouse ? "#27354A" : "#1E293B")
+            border.color: "#334155"
+            border.width: 1
+            opacity: worldEditor.canRedo ? 1.0 : 0.4
 
             Text {
                 anchors.centerIn: parent
@@ -306,7 +310,7 @@ Rectangle {
             Layout.preferredWidth: 50
             Layout.preferredHeight: 50
             radius: 14
-            color: maCountry.pressed ? "#1E293B" : (maCountry.containsMouse ? "#1E293B88" : "#0B111E")
+            color: maCountry.pressed ? "#334155" : (maCountry.containsMouse ? "#27354A" : "#1E293B")
             border.color: worldEditor.activeCountryColor
             border.width: 2.5
 
