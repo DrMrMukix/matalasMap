@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<svg id="Zaria" width="360" height="240" version="1.1" viewBox="0 0 360 240" xmlns="http://www.w3.org/2000/svg">
+ <g id="layer1">
+  <path id="path28280" d="m0 0h360v240h-360z" style="fill-rule:evenodd;fill:#fde900"/>
+  <path id="path28282" d="m10 10h340v220z" style="fill-rule:evenodd;fill:#f30310"/>
+  <path id="path28284" d="m350 230h-340v-220z" style="fill-rule:evenodd;fill:#ffffff"/>
+  <path id="path28286" d="m8.53125 3.09375-5.4375 8.375 4.1875 2.71875 340 220 4.1875 2.71875 5.4375-8.375-4.1875-2.71875-340-220z" style="fill-rule:evenodd;fill:#fde900"/>
+  <path id="path28288" d="m300 30h30v60h-30z" style="fill-rule:evenodd;fill:#ffffff"/>
+  <path id="path28290" d="m30 150h30v60h-30z" style="fill-rule:evenodd;fill:#f30310"/>
+ </g>
+</svg>

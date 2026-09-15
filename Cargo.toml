@@ -1,6 +1,14 @@
 [workspace]
 members = [
     "rust",
-    "tools/svg_preprocessor"
+    "tools/svg_preprocessor",
+    "tools/wikimedia_importer"
 ]
 resolver = "2"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

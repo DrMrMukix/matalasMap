@@ -1,4 +1,4 @@
-use crate::core::types::{ColorRgba, WORLD_HEIGHT, WORLD_WIDTH};
+use crate::core::types::{WORLD_HEIGHT, WORLD_WIDTH};
 use crate::political::country::Country;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
@@ -146,11 +146,10 @@ pub fn load_world_header_only(path: &Path) -> Result<WorldSaveHeader, Box<dyn st
     Ok(save.header)
 }
 
-pub fn load_world_from_path(
-    path: &Path,
+pub fn load_world_from_bytes(
+    bytes: &[u8],
 ) -> Result<(WorldSaveHeader, Vec<Country>, Vec<u8>, Vec<u16>), Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
+    let reader = std::io::Cursor::new(bytes);
     let save: WorldSaveFile = serde_json::from_reader(reader)?;
 
     let terrain = decompress_bytes(&save.terrain_compressed)?;
@@ -162,4 +161,11 @@ pub fn load_world_from_path(
     }
 
     Ok((save.header, save.countries, terrain, political))
+}
+
+pub fn load_world_from_path(
+    path: &Path,
+) -> Result<(WorldSaveHeader, Vec<Country>, Vec<u8>, Vec<u16>), Box<dyn std::error::Error>> {
+    let bytes = std::fs::read(path)?;
+    load_world_from_bytes(&bytes)
 }

@@ -1,55 +1,86 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import "../components"
 
 Dialog {
     id: root
-    title: "Crear Nuevo Mundo"
+    title: ""
     modal: true
     anchors.centerIn: parent
-    width: Math.min(540, parent.width - 40)
-    standardButtons: Dialog.Cancel
+    width: Math.min(760, parent.width - 32)
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
     background: Rectangle {
-        color: "#1E293B"
-        radius: 20
+        color: "#0F172A"
+        radius: 24
         border.color: "#334155"
         border.width: 2
-    }
 
-    header: Rectangle {
-        color: "transparent"
-        height: 60
-        Text {
-            anchors.centerIn: parent
-            text: "🌟 ¡Crea tu Mundo!"
-            font.pixelSize: 22
-            font.bold: true
-            color: "#F8FAFC"
+        Rectangle {
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: 5
+            radius: 2.5
+            color: "#3B82F6"
         }
     }
 
-    contentItem: Column {
+    contentItem: ColumnLayout {
         spacing: 20
-        padding: 10
 
-        Text {
-            text: "¿Cómo quieres empezar tu mapa?"
-            font.pixelSize: 15
-            color: "#94A3B8"
-            anchors.horizontalCenter: parent.horizontalCenter
+        // Header
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.margins: 4
+
+            Text {
+                text: "🌟 ¡Crea un Nuevo Mundo!"
+                font.pixelSize: 20
+                font.bold: true
+                color: "#F8FAFC"
+                Layout.fillWidth: true
+            }
+
+            MatalasButton {
+                iconText: "✕"
+                iconOnly: true
+                height: 36
+                width: 36
+                variant: "ghost"
+                onClicked: root.reject()
+            }
         }
 
-        Row {
-            spacing: 20
-            anchors.horizontalCenter: parent.horizontalCenter
+        Text {
+            text: "¿Cómo quieres empezar tu mapa creativo?"
+            font.pixelSize: 14
+            color: "#94A3B8"
+            Layout.alignment: Qt.AlignHCenter
+        }
 
-            // Earth Option
+        Flickable {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 215
+            contentWidth: Math.max(width, cardsRow.implicitWidth + 24)
+            contentHeight: 215
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+            clip: true
+
+            RowLayout {
+                id: cardsRow
+                height: 200
+                anchors.centerIn: parent
+                spacing: 16
+
+            // 1. Earth Blank Option
             Rectangle {
-                id: earthCard
-                width: 200
-                height: 180
+                width: 220
+                height: 200
                 radius: 18
-                color: eMouse.containsMouse ? "#2E4057" : "#0F172A"
+                color: eMouse.containsMouse ? "#1E293B" : "#162032"
                 border.color: eMouse.containsMouse ? "#38BDF8" : "#334155"
                 border.width: 2
 
@@ -58,24 +89,24 @@ Dialog {
 
                 Column {
                     anchors.centerIn: parent
-                    spacing: 12
+                    spacing: 8
 
                     Text {
-                        text: "🌎"
-                        font.pixelSize: 48
+                        text: "🌍"
+                        font.pixelSize: 42
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
 
                     Text {
-                        text: "La Tierra"
-                        font.pixelSize: 18
+                        text: "Tierra Virgen"
+                        font.pixelSize: 16
                         font.bold: true
                         color: "#FFFFFF"
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
 
                     Text {
-                        text: "Mapa real 8K\nlisto para pintar"
+                        text: "Mapa real 8K\n(continentes vacíos\nlistos para pintar)"
                         font.pixelSize: 12
                         color: "#94A3B8"
                         horizontalAlignment: Text.AlignHCenter
@@ -89,19 +120,69 @@ Dialog {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        worldEditor.newWorld("La Tierra", true);
+                        worldEditor.startAsyncNewWorld("La Tierra", 1);
                         root.accept();
                     }
                 }
             }
 
-            // Empty World Option
+            // 2. Earth 2026 Option
             Rectangle {
-                id: emptyCard
-                width: 200
-                height: 180
+                width: 220
+                height: 200
                 radius: 18
-                color: wMouse.containsMouse ? "#2E4057" : "#0F172A"
+                color: nMouse.containsMouse ? "#1E293B" : "#162032"
+                border.color: nMouse.containsMouse ? "#38BDF8" : "#334155"
+                border.width: 2
+
+                scale: nMouse.pressed ? 0.95 : (nMouse.containsMouse ? 1.03 : 1.0)
+                Behavior on scale { NumberAnimation { duration: 100 } }
+
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 8
+
+                    Text {
+                        text: "🚩"
+                        font.pixelSize: 42
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+
+                    Text {
+                        text: "Tierra 2026"
+                        font.pixelSize: 16
+                        font.bold: true
+                        color: "#FFFFFF"
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+
+                    Text {
+                        text: "Mapa real 8K con\npaíses actuales\ny banderas oficiales"
+                        font.pixelSize: 12
+                        color: "#94A3B8"
+                        horizontalAlignment: Text.AlignHCenter
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+                }
+
+                MouseArea {
+                    id: nMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        worldEditor.startAsyncNewWorld("Tierra 2026", 2);
+                        root.accept();
+                    }
+                }
+            }
+
+            // 3. Empty World Option
+            Rectangle {
+                width: 220
+                height: 200
+                radius: 18
+                color: wMouse.containsMouse ? "#1E293B" : "#162032"
                 border.color: wMouse.containsMouse ? "#38BDF8" : "#334155"
                 border.width: 2
 
@@ -110,24 +191,24 @@ Dialog {
 
                 Column {
                     anchors.centerIn: parent
-                    spacing: 12
+                    spacing: 8
 
                     Text {
                         text: "🌊"
-                        font.pixelSize: 48
+                        font.pixelSize: 42
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
 
                     Text {
-                        text: "Mundo Vacío"
-                        font.pixelSize: 18
+                        text: "Océano Total"
+                        font.pixelSize: 16
                         font.bold: true
                         color: "#FFFFFF"
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
 
                     Text {
-                        text: "Océano completo\ncrea tus continentes"
+                        text: "Océano completo\ncrea tus continentes\ndesde cero"
                         font.pixelSize: 12
                         color: "#94A3B8"
                         horizontalAlignment: Text.AlignHCenter
@@ -141,11 +222,21 @@ Dialog {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        worldEditor.newWorld("Mi Mundo", false);
+                        worldEditor.startAsyncNewWorld("Mi Mundo", 0);
                         root.accept();
                     }
                 }
             }
+        }
+    }
+
+    Item { height: 6 }
+
+        MatalasButton {
+            Layout.alignment: Qt.AlignHCenter
+            text: "Cerrar"
+            variant: "default"
+            onClicked: root.reject()
         }
     }
 }

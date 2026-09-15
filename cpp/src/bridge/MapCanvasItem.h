@@ -3,7 +3,11 @@
 #include <QQuickPaintedItem>
 #include <QImage>
 #include <QPointF>
+#include <QHash>
+#include <QSharedPointer>
 #include "WorldEditorBridge.h"
+
+class QSvgRenderer;
 
 class MapCanvasItem : public QQuickPaintedItem {
     Q_OBJECT
@@ -47,6 +51,10 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void touchEvent(QTouchEvent* event) override;
+    void hoverEnterEvent(QHoverEvent* event) override;
+    void hoverMoveEvent(QHoverEvent* event) override;
+    void hoverLeaveEvent(QHoverEvent* event) override;
     void geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry) override;
 
 private slots:
@@ -56,10 +64,10 @@ private slots:
 private:
     QPointF screenToWorld(const QPointF& screenPos) const;
     QPointF worldToScreen(const QPointF& worldPos) const;
+    bool isWorldPosValid(const QPointF& worldPos) const;
     void strokeLine(int x0, int y0, int x1, int y1);
 
     WorldEditorBridge* m_bridge = nullptr;
-    QImage m_worldImage;
 
     qreal m_zoom = 1.0;
     qreal m_panX = 0.0;
@@ -67,6 +75,15 @@ private:
 
     bool m_isPainting = false;
     bool m_isPanning = false;
+    bool m_isHovering = false;
+    QPointF m_currentScreenPos;
     QPointF m_lastMousePos;
     QPoint m_lastWorldPos;
+
+    bool m_pinchActive = false;
+    qreal m_initialPinchDist = 0.0;
+    qreal m_initialPinchZoom = 1.0;
+    QPointF m_lastPinchMid;
+
+    QHash<QString, QSharedPointer<QSvgRenderer>> m_svgCache;
 };

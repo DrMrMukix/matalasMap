@@ -1,9 +1,8 @@
 use crate::core::types::{ColorRgba, DisplayMode, EditorMode, Rect, ToolType, WORLD_HEIGHT, WORLD_WIDTH};
-use crate::political::country::CountryId;
 use crate::save;
 use crate::world::WorldState;
-use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_void};
+use std::ffi::CStr;
+use std::os::raw::c_char;
 use std::path::Path;
 
 #[repr(C)]
@@ -40,6 +39,7 @@ pub struct FfiCountryInfo {
     pub b: u8,
     pub a: u8,
     pub pixel_count: u64,
+    pub flag_path: [c_char; 128],
 }
 
 #[no_mangle]
@@ -81,7 +81,7 @@ pub unsafe extern "C" fn matalas_world_create_from_preset(
                 for (i, pixel) in rgba.pixels().enumerate() {
                     if i < terrain_data.len() {
                         // Land is #4E9A51 (Green component > 100 and Blue component < 100)
-                        let [r, g, b, _] = pixel.0;
+                        let [_r, g, b, _] = pixel.0;
                         if g > 120 && b < 100 {
                             terrain_data[i] = 1;
                         } else {
@@ -95,6 +95,50 @@ pub unsafe extern "C" fn matalas_world_create_from_preset(
                 if let Ok(decomp) = save::decompress_bytes(&gz_bytes) {
                     if decomp.len() == terrain_data.len() {
                         terrain_data = decomp;
+                    }
+                }
+            }
+        }
+    }
+
+    match WorldState::new_with_terrain(name_str, terrain_data) {
+        Ok(world) => Box::into_raw(Box::new(world)),
+        Err(_) => Box::into_raw(Box::new(WorldState::new_empty(name_str))),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn matalas_world_create_with_terrain_buffer(
+    name: *const c_char,
+    buffer_ptr: *const u8,
+    buffer_len: usize,
+) -> *mut WorldState {
+    let name_str = if !name.is_null() {
+        CStr::from_ptr(name).to_str().unwrap_or("Tierra")
+    } else {
+        "Tierra"
+    };
+
+    let mut terrain_data = vec![0u8; (WORLD_WIDTH * WORLD_HEIGHT) as usize];
+
+    if !buffer_ptr.is_null() && buffer_len > 0 {
+        let slice = std::slice::from_raw_parts(buffer_ptr, buffer_len);
+        // Check if gzip compressed (magic bytes: 0x1f, 0x8b)
+        if buffer_len >= 2 && slice[0] == 0x1f && slice[1] == 0x8b {
+            if let Ok(decomp) = save::decompress_bytes(slice) {
+                if decomp.len() == terrain_data.len() {
+                    terrain_data = decomp;
+                }
+            }
+        } else if let Ok(img) = image::load_from_memory(slice) {
+            let rgba = img.to_rgba8();
+            for (i, pixel) in rgba.pixels().enumerate() {
+                if i < terrain_data.len() {
+                    let [_, g, b, _] = pixel.0;
+                    if g > 120 && b < 100 {
+                        terrain_data[i] = 1;
+                    } else {
+                        terrain_data[i] = 0;
                     }
                 }
             }
@@ -344,6 +388,38 @@ pub unsafe extern "C" fn matalas_world_render_rect(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn matalas_world_render_rect_strided(
+    world: *mut WorldState,
+    min_x: u32,
+    min_y: u32,
+    max_x: u32,
+    max_y: u32,
+    out_buffer: *mut u8,
+    buffer_len: usize,
+    stride: usize,
+) -> bool {
+    if world.is_null() || out_buffer.is_null() {
+        return false;
+    }
+
+    let rect = Rect::new(min_x, min_y, max_x, max_y);
+    let rw = rect.width() as usize;
+    let rh = rect.height() as usize;
+    if rw == 0 || rh == 0 {
+        return true;
+    }
+
+    let needed = (rh - 1) * stride + (rw * 4);
+    if buffer_len < needed {
+        return false;
+    }
+
+    let slice = std::slice::from_raw_parts_mut(out_buffer, buffer_len);
+    (*world).render_rect_to_rgba_strided(&rect, slice, stride);
+    true
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn matalas_world_get_country_count(world: *mut WorldState) -> usize {
     if world.is_null() {
         return 0;
@@ -374,6 +450,7 @@ pub unsafe extern "C" fn matalas_world_get_country_info(
         b: c.color.b,
         a: c.color.a,
         pixel_count: c.pixel_count,
+        flag_path: [0; 128],
     };
 
     let bytes = c.name.as_bytes();
@@ -382,7 +459,54 @@ pub unsafe extern "C" fn matalas_world_get_country_info(
         info.name[i] = bytes[i] as c_char;
     }
 
+    let flag_bytes = c.flag_path.as_bytes();
+    let flen = flag_bytes.len().min(127);
+    for i in 0..flen {
+        info.flag_path[i] = flag_bytes[i] as c_char;
+    }
+
     *out_info = info;
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn matalas_world_set_display_mode(world: *mut WorldState, mode: u32) {
+    if !world.is_null() {
+        (*world).set_display_mode(DisplayMode::from(mode));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn matalas_world_set_country_flag(
+    world: *mut WorldState,
+    country_id: u16,
+    flag_path: *const c_char,
+) {
+    if !world.is_null() && !flag_path.is_null() {
+        if let Ok(s) = CStr::from_ptr(flag_path).to_str() {
+            (*world).set_country_flag(country_id, s);
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn matalas_world_set_country_flag_rgba(
+    world: *mut WorldState,
+    country_id: u16,
+    width: u32,
+    height: u32,
+    data_ptr: *const u8,
+    data_len: usize,
+) -> bool {
+    if world.is_null() || data_ptr.is_null() || width == 0 || height == 0 {
+        return false;
+    }
+    let needed = (width * height * 4) as usize;
+    if data_len < needed {
+        return false;
+    }
+    let slice = std::slice::from_raw_parts(data_ptr, needed);
+    (*world).set_country_flag_rgba(country_id, width, height, slice.to_vec());
     true
 }
 
@@ -414,3 +538,47 @@ pub unsafe extern "C" fn matalas_world_load(file_path: *const c_char) -> *mut Wo
         Err(_) => std::ptr::null_mut(),
     }
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn matalas_world_load_from_memory(data_ptr: *const u8, data_len: usize) -> *mut WorldState {
+    if data_ptr.is_null() || data_len == 0 {
+        return std::ptr::null_mut();
+    }
+    let slice = std::slice::from_raw_parts(data_ptr, data_len);
+    match WorldState::load_from_bytes(slice) {
+        Ok(w) => Box::into_raw(Box::new(w)),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[repr(C)]
+pub struct FfiFlagAnchor {
+    pub country_id: u16,
+    pub x: u32,
+    pub y: u32,
+    pub pixel_count: u32,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn matalas_world_get_flag_anchors(
+    world: *mut WorldState,
+    out_anchors: *mut FfiFlagAnchor,
+    max_anchors: usize,
+) -> usize {
+    if world.is_null() || out_anchors.is_null() || max_anchors == 0 {
+        return 0;
+    }
+    let anchors = (*world).compute_flag_anchors();
+    let count = anchors.len().min(max_anchors);
+    let slice = std::slice::from_raw_parts_mut(out_anchors, count);
+    for i in 0..count {
+        slice[i] = FfiFlagAnchor {
+            country_id: anchors[i].country_id,
+            x: anchors[i].x,
+            y: anchors[i].y,
+            pixel_count: anchors[i].pixel_count,
+        };
+    }
+    count
+}
+

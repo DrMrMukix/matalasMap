@@ -1,6 +1,17 @@
 target/
 build/
+build_release/
+build_android/
+dist/
 *.user
 .idea/
 .vscode/
 *.matalas
+*.log
+aqtinstall.log
+tablet_screen*.png
+debug.keystore
+tools/gh/
+saves/
+*.zip
+.gemini/

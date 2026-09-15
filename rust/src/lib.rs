@@ -11,8 +11,7 @@ pub use world::WorldState;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{ColorRgba, EditorMode, ToolType};
-    use std::path::Path;
+    use crate::core::types::{ColorRgba, EditorMode, Rect, ToolType};
 
     #[test]
     fn test_world_creation_and_terrain_painting() {
@@ -29,14 +28,43 @@ mod tests {
 
         // Test Undo
         assert!(world.undo_manager.can_undo());
-        let (undo_rect, mode) = world.undo().expect("Undo should succeed");
+        let (_undo_rect, mode) = world.undo().expect("Undo should succeed");
         assert_eq!(mode, EditorMode::Terrain);
         assert_eq!(world.terrain.get(100, 100), 0); // Back to water!
 
         // Test Redo
         assert!(world.undo_manager.can_redo());
-        let (redo_rect, _) = world.redo().expect("Redo should succeed");
+        let (_redo_rect, _) = world.redo().expect("Redo should succeed");
         assert_eq!(world.terrain.get(100, 100), 1); // Land again!
+    }
+
+    #[test]
+    fn test_render_rect_strided() {
+        let mut world = WorldState::new_empty("Render Test");
+        // Paint land first
+        world.brush_radius = 5;
+        world.paint_at(10, 10);
+
+        let cid = world.create_country("Testland", ColorRgba::new(200, 50, 50, 255));
+        world.active_mode = EditorMode::Political;
+        world.active_country_id = cid;
+        world.brush_radius = 2;
+        world.paint_at(10, 10);
+
+        let rect = Rect::new(8, 8, 12, 12);
+        let _rw = rect.width() as usize; // 5
+        let rh = rect.height() as usize; // 5
+        let stride = 64; // Stride larger than rw * 4 (20)
+        let mut buffer = vec![0u8; rh * stride];
+
+        world.render_rect_to_rgba_strided(&rect, &mut buffer, stride);
+
+        // Center pixel (10, 10) corresponds to row_idx 2, col_idx 2 in rect (8..=12)
+        let center_offset = 2 * stride + (2 * 4);
+        assert_eq!(buffer[center_offset], 200);
+        assert_eq!(buffer[center_offset + 1], 50);
+        assert_eq!(buffer[center_offset + 2], 50);
+        assert_eq!(buffer[center_offset + 3], 255);
     }
 
     #[test]

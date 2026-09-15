@@ -1,0 +1,17 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qml/Main.qml</file>
+        <file>qml/components/BrushSizeSelector.qml</file>
+        <file>qml/components/ColorPickerPopup.qml</file>
+        <file>qml/components/CountryChip.qml</file>
+        <file>qml/components/LoadingOverlay.qml</file>
+        <file>qml/components/MatalasButton.qml</file>
+        <file>qml/dialogs/NationLibraryDialog.qml</file>
+        <file>qml/dialogs/NewWorldDialog.qml</file>
+        <file>qml/dialogs/SaveWorldDialog.qml</file>
+        <file>qml/dialogs/WorldLibraryDialog.qml</file>
+        <file>qml/panels/CountryPanel.qml</file>
+        <file>qml/panels/LeftToolRail.qml</file>
+        <file>qml/panels/TopBar.qml</file>
+    </qresource>
+</RCC>

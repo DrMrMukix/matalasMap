@@ -22,12 +22,14 @@ typedef struct {
     uint8_t b;
     uint8_t a;
     uint64_t pixel_count;
+    char flag_path[128];
 } FfiCountryInfo;
 
 typedef void* WorldStateHandle;
 
 WorldStateHandle matalas_world_create_empty(const char* name);
 WorldStateHandle matalas_world_create_from_preset(const char* name, const char* preset_png_or_bin);
+WorldStateHandle matalas_world_create_with_terrain_buffer(const char* name, const uint8_t* buffer_ptr, size_t buffer_len);
 void matalas_world_destroy(WorldStateHandle world);
 
 bool matalas_world_paint_at(WorldStateHandle world, uint32_t x, uint32_t y, FfiRect* out_rect);
@@ -36,8 +38,11 @@ uint16_t matalas_world_pick_at(WorldStateHandle world, uint32_t x, uint32_t y);
 
 void matalas_world_set_tool(WorldStateHandle world, uint32_t tool_type);
 void matalas_world_set_mode(WorldStateHandle world, uint32_t editor_mode);
+void matalas_world_set_display_mode(WorldStateHandle world, uint32_t mode);
 void matalas_world_set_brush_radius(WorldStateHandle world, uint32_t radius);
 void matalas_world_set_active_country(WorldStateHandle world, uint16_t country_id);
+void matalas_world_set_country_flag(WorldStateHandle world, uint16_t country_id, const char* flag_path);
+bool matalas_world_set_country_flag_rgba(WorldStateHandle world, uint16_t country_id, uint32_t width, uint32_t height, const uint8_t* data_ptr, size_t data_len);
 
 uint16_t matalas_world_create_country(WorldStateHandle world, const char* name, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 bool matalas_world_update_country(WorldStateHandle world, uint16_t id, const char* name, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
@@ -58,11 +63,32 @@ bool matalas_world_render_rect(
     size_t buffer_len
 );
 
+bool matalas_world_render_rect_strided(
+    WorldStateHandle world,
+    uint32_t min_x,
+    uint32_t min_y,
+    uint32_t max_x,
+    uint32_t max_y,
+    uint8_t* out_buffer,
+    size_t buffer_len,
+    size_t stride
+);
+
 size_t matalas_world_get_country_count(WorldStateHandle world);
 bool matalas_world_get_country_info(WorldStateHandle world, size_t index, FfiCountryInfo* out_info);
 
 bool matalas_world_save(WorldStateHandle world, const char* file_path);
 WorldStateHandle matalas_world_load(const char* file_path);
+WorldStateHandle matalas_world_load_from_memory(const uint8_t* data_ptr, size_t data_len);
+
+typedef struct {
+    uint16_t country_id;
+    uint32_t x;
+    uint32_t y;
+    uint32_t pixel_count;
+} FfiFlagAnchor;
+
+size_t matalas_world_get_flag_anchors(WorldStateHandle world, FfiFlagAnchor* out_anchors, size_t max_anchors);
 
 #ifdef __cplusplus
 }

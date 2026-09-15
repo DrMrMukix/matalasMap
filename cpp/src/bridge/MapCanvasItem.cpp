@@ -2,6 +2,12 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QTouchEvent>
+#include <QLineF>
+#include <QCursor>
+#include <QCoreApplication>
+#include <QFileInfo>
+#include <QDir>
 #include <cmath>
 
 static const int WORLD_W = 8192;
@@ -9,11 +15,11 @@ static const int WORLD_H = 4096;
 
 MapCanvasItem::MapCanvasItem(QQuickItem* parent)
     : QQuickPaintedItem(parent)
-    , m_worldImage(WORLD_W, WORLD_H, QImage::Format_RGBA8888)
 {
     setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton | Qt::MiddleButton);
+    setAcceptTouchEvents(true);
     setAcceptHoverEvents(true);
-    m_worldImage.fill(QColor(36, 79, 117)); // ocean default
+    setCursor(Qt::CrossCursor);
 }
 
 void MapCanvasItem::setBridge(WorldEditorBridge* bridge)
@@ -29,6 +35,14 @@ void MapCanvasItem::setBridge(WorldEditorBridge* bridge)
     if (m_bridge) {
         connect(m_bridge, &WorldEditorBridge::regionDirty, this, &MapCanvasItem::onRegionDirty);
         connect(m_bridge, &WorldEditorBridge::worldLoaded, this, &MapCanvasItem::onWorldLoaded);
+        connect(m_bridge, &WorldEditorBridge::displayModeChanged, this, [this]() { update(); });
+        connect(m_bridge, &WorldEditorBridge::activeToolChanged, this, [this]() {
+            if (m_bridge && m_bridge->activeTool() == WorldEditorBridge::Hand) {
+                setCursor(Qt::OpenHandCursor);
+            } else {
+                setCursor(Qt::CrossCursor);
+            }
+        });
         onWorldLoaded();
     }
 
@@ -54,8 +68,18 @@ void MapCanvasItem::setPanX(qreal x)
 
 void MapCanvasItem::setPanY(qreal y)
 {
-    if (qFuzzyCompare(m_panY, y)) return;
-    m_panY = y;
+    qreal scaledH = WORLD_H * m_zoom;
+    qreal clampedY = y;
+    if (height() > 0 && scaledH > 0) {
+        if (scaledH <= height()) {
+            clampedY = (height() - scaledH) * 0.5;
+        } else {
+            clampedY = qBound(height() - scaledH, y, 0.0);
+        }
+    }
+
+    if (qFuzzyCompare(m_panY, clampedY)) return;
+    m_panY = clampedY;
     emit panChanged();
     update();
 }
@@ -93,23 +117,70 @@ void MapCanvasItem::centerOn(qreal worldX, qreal worldY)
 
 void MapCanvasItem::zoomIn()
 {
-    QPointF center(width() * 0.5, height() * 0.5);
-    QPointF worldCenter = screenToWorld(center);
-    setZoom(m_zoom * 1.3);
-    centerOn(worldCenter.x(), worldCenter.y());
+    qreal factor = 1.3;
+    qreal newZoom = qBound(0.05, m_zoom * factor, 32.0);
+    if (qFuzzyCompare(newZoom, m_zoom)) return;
+
+    qreal cx = width() * 0.5;
+    qreal cy = height() * 0.5;
+    qreal scaleRatio = newZoom / m_zoom;
+    m_panX = cx - (cx - m_panX) * scaleRatio;
+    m_panY = cy - (cy - m_panY) * scaleRatio;
+    m_zoom = newZoom;
+
+    qreal scaledW = WORLD_W * m_zoom;
+    if (scaledW > 0) {
+        while (m_panX > 0.0) m_panX -= scaledW;
+        while (m_panX <= -scaledW) m_panX += scaledW;
+    }
+    setPanY(m_panY);
+
+    emit zoomChanged();
+    emit panChanged();
+    update();
 }
 
 void MapCanvasItem::zoomOut()
 {
-    QPointF center(width() * 0.5, height() * 0.5);
-    QPointF worldCenter = screenToWorld(center);
-    setZoom(m_zoom / 1.3);
-    centerOn(worldCenter.x(), worldCenter.y());
+    qreal factor = 1.0 / 1.3;
+    qreal newZoom = qBound(0.05, m_zoom * factor, 32.0);
+    if (qFuzzyCompare(newZoom, m_zoom)) return;
+
+    qreal cx = width() * 0.5;
+    qreal cy = height() * 0.5;
+    qreal scaleRatio = newZoom / m_zoom;
+    m_panX = cx - (cx - m_panX) * scaleRatio;
+    m_panY = cy - (cy - m_panY) * scaleRatio;
+    m_zoom = newZoom;
+
+    qreal scaledW = WORLD_W * m_zoom;
+    if (scaledW > 0) {
+        while (m_panX > 0.0) m_panX -= scaledW;
+        while (m_panX <= -scaledW) m_panX += scaledW;
+    }
+    setPanY(m_panY);
+
+    emit zoomChanged();
+    emit panChanged();
+    update();
 }
 
 QPointF MapCanvasItem::screenToWorld(const QPointF& screenPos) const
 {
-    return QPointF((screenPos.x() - m_panX) / m_zoom, (screenPos.y() - m_panY) / m_zoom);
+    qreal scaledW = WORLD_W * m_zoom;
+    if (scaledW <= 0) return QPointF(0, 0);
+
+    qreal rawX = (screenPos.x() - m_panX) / m_zoom;
+    qreal wx = std::fmod(rawX, (qreal)WORLD_W);
+    if (wx < 0.0) wx += (qreal)WORLD_W;
+
+    qreal wy = (screenPos.y() - m_panY) / m_zoom;
+    return QPointF(wx, wy);
+}
+
+bool MapCanvasItem::isWorldPosValid(const QPointF& worldPos) const
+{
+    return worldPos.y() >= 0.0 && worldPos.y() < (qreal)WORLD_H;
 }
 
 QPointF MapCanvasItem::worldToScreen(const QPointF& worldPos) const
@@ -119,69 +190,112 @@ QPointF MapCanvasItem::worldToScreen(const QPointF& worldPos) const
 
 void MapCanvasItem::paint(QPainter* painter)
 {
+    if (!m_bridge) return;
+    const QImage& worldImg = m_bridge->worldImage();
+    if (worldImg.isNull()) return;
+
     painter->setRenderHint(QPainter::SmoothPixmapTransform, m_zoom < 1.0);
+    painter->setRenderHint(QPainter::Antialiasing, true);
 
-    // Compute visible destination rect
-    QRectF targetRect(m_panX, m_panY, WORLD_W * m_zoom, WORLD_H * m_zoom);
-    QRectF sourceRect(0, 0, WORLD_W, WORLD_H);
+    qreal scaledW = WORLD_W * m_zoom;
+    qreal scaledH = WORLD_H * m_zoom;
+    if (scaledW <= 0 || scaledH <= 0) return;
 
-    painter->drawImage(targetRect, m_worldImage, sourceRect);
+    QRectF viewport(0, 0, width(), height());
+
+    // Continuous horizontal repeating tiles across the viewport
+    int k_start = (int)std::floor((0.0 - m_panX) / scaledW);
+    int k_end = (int)std::floor((width() - m_panX) / scaledW);
+
+    for (int k = k_start; k <= k_end; ++k) {
+        qreal tileLeft = m_panX + k * scaledW;
+        QRectF targetRect(tileLeft, m_panY, scaledW, scaledH);
+        QRectF visibleTarget = targetRect.intersected(viewport);
+        if (visibleTarget.isEmpty()) continue;
+
+        qreal sx = (visibleTarget.left() - tileLeft) / m_zoom;
+        qreal sy = (visibleTarget.top() - m_panY) / m_zoom;
+        qreal sw = visibleTarget.width() / m_zoom;
+        qreal sh = visibleTarget.height() / m_zoom;
+
+        sx = qBound(0.0, sx, (qreal)WORLD_W);
+        sy = qBound(0.0, sy, (qreal)WORLD_H);
+        sw = qBound(0.0, sw, (qreal)WORLD_W - sx);
+        sh = qBound(0.0, sh, (qreal)WORLD_H - sy);
+
+        QRectF visibleSource(sx, sy, sw, sh);
+        painter->drawImage(visibleTarget, worldImg, visibleSource);
+    }
+
+    // Brush cursor preview ring: shows the exact brush radius on the map under cursor/touch
+    if (m_isHovering && m_bridge &&
+        (m_bridge->activeTool() == WorldEditorBridge::Brush || m_bridge->activeTool() == WorldEditorBridge::Eraser)) {
+        qreal radiusScreen = m_bridge->brushRadius() * m_zoom;
+        if (radiusScreen >= 1.0) {
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing, true);
+            painter->setBrush(Qt::NoBrush);
+
+            QColor innerColor = (m_bridge->activeTool() == WorldEditorBridge::Eraser)
+                ? QColor(239, 68, 68, 230)
+                : ((m_bridge->activeMode() == WorldEditorBridge::Terrain) ? QColor(52, 211, 153, 230) : m_bridge->activeCountryColor());
+            innerColor.setAlpha(220);
+
+            // Outer dark contour for high contrast over light regions
+            painter->setPen(QPen(QColor(15, 23, 42, 190), 2.5, Qt::SolidLine));
+            painter->drawEllipse(m_currentScreenPos, radiusScreen, radiusScreen);
+
+            // Inner colored accent ring
+            painter->setPen(QPen(innerColor, 1.5, Qt::SolidLine));
+            painter->drawEllipse(m_currentScreenPos, radiusScreen, radiusScreen);
+            painter->restore();
+        }
+    }
 }
 
 void MapCanvasItem::onRegionDirty(int minX, int minY, int maxX, int maxY)
 {
-    if (!m_bridge || !m_bridge->handle()) return;
-
-    int w = maxX - minX + 1;
-    int h = maxY - minY + 1;
-    if (w <= 0 || h <= 0) return;
-
-    QByteArray buffer(w * h * 4, Qt::Uninitialized);
-    bool ok = matalas_world_render_rect(
-        m_bridge->handle(),
-        minX, minY, maxX, maxY,
-        reinterpret_cast<uint8_t*>(buffer.data()),
-        buffer.size()
-    );
-
-    if (ok) {
-        const uchar* srcData = reinterpret_cast<const uchar*>(buffer.constData());
-        int srcLineBytes = w * 4;
-
-        for (int y = 0; y < h; ++y) {
-            uchar* destLine = m_worldImage.scanLine(minY + y) + (minX * 4);
-            memcpy(destLine, srcData + (y * srcLineBytes), srcLineBytes);
-        }
-
-        update();
-    }
+    Q_UNUSED(minX);
+    Q_UNUSED(minY);
+    Q_UNUSED(maxX);
+    Q_UNUSED(maxY);
+    update();
 }
 
 void MapCanvasItem::onWorldLoaded()
 {
-    onRegionDirty(0, 0, WORLD_W - 1, WORLD_H - 1);
+    update();
 }
 
 void MapCanvasItem::mousePressEvent(QMouseEvent* event)
 {
     m_lastMousePos = event->position();
     QPointF worldPosF = screenToWorld(m_lastMousePos);
-    int wx = qBound(0, (int)worldPosF.x(), WORLD_W - 1);
-    int wy = qBound(0, (int)worldPosF.y(), WORLD_H - 1);
+    int wx = (int)std::floor(worldPosF.x());
+    int wy = (int)std::floor(worldPosF.y());
 
-    if (event->button() == Qt::RightButton || event->button() == Qt::MiddleButton) {
+    bool isHandTool = (m_bridge && m_bridge->activeTool() == WorldEditorBridge::Hand);
+
+    if (event->button() == Qt::RightButton || event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && isHandTool)) {
         m_isPanning = true;
+        setCursor(Qt::ClosedHandCursor);
         event->accept();
         return;
     }
 
     if (event->button() == Qt::LeftButton && m_bridge) {
+        if (!isWorldPosValid(worldPosF)) {
+            // Clicked outside vertical map bounds; ignore to avoid edge painting bug!
+            event->accept();
+            return;
+        }
+
         int tool = m_bridge->activeTool();
-        if (tool == 2) { // Fill
+        if (tool == WorldEditorBridge::Fill) {
             m_bridge->fillAt(wx, wy);
-        } else if (tool == 3) { // Picker
+        } else if (tool == WorldEditorBridge::Picker) {
             m_bridge->pickAt(wx, wy);
-        } else { // Brush / Eraser
+        } else if (tool == WorldEditorBridge::Brush || tool == WorldEditorBridge::Eraser) {
             m_isPainting = true;
             m_lastWorldPos = QPoint(wx, wy);
             m_bridge->paintAt(wx, wy);
@@ -195,15 +309,22 @@ void MapCanvasItem::mouseMoveEvent(QMouseEvent* event)
     QPointF pos = event->position();
     QPointF delta = pos - m_lastMousePos;
     m_lastMousePos = pos;
+    m_currentScreenPos = pos;
+    m_isHovering = true;
 
     QPointF worldPosF = screenToWorld(pos);
-    int wx = qBound(0, (int)worldPosF.x(), WORLD_W - 1);
-    int wy = qBound(0, (int)worldPosF.y(), WORLD_H - 1);
+    int wx = (int)std::floor(worldPosF.x());
+    int wy = (int)std::floor(worldPosF.y());
     emit cursorWorldCoordsChanged(wx, wy);
 
     if (m_isPanning) {
         m_panX += delta.x();
-        m_panY += delta.y();
+        qreal scaledW = WORLD_W * m_zoom;
+        if (scaledW > 0) {
+            while (m_panX > 0.0) m_panX -= scaledW;
+            while (m_panX <= -scaledW) m_panX += scaledW;
+        }
+        setPanY(m_panY + delta.y());
         emit panChanged();
         update();
         event->accept();
@@ -211,16 +332,38 @@ void MapCanvasItem::mouseMoveEvent(QMouseEvent* event)
     }
 
     if (m_isPainting && m_bridge) {
-        strokeLine(m_lastWorldPos.x(), m_lastWorldPos.y(), wx, wy);
-        m_lastWorldPos = QPoint(wx, wy);
+        if (isWorldPosValid(worldPosF)) {
+            if (isWorldPosValid(m_lastWorldPos)) {
+                int dx = std::abs(wx - m_lastWorldPos.x());
+                if (dx < WORLD_W / 2) {
+                    strokeLine(m_lastWorldPos.x(), m_lastWorldPos.y(), wx, wy);
+                } else {
+                    // Crossing the meridian seam
+                    if (m_lastWorldPos.x() > wx) {
+                        strokeLine(m_lastWorldPos.x(), m_lastWorldPos.y(), wx + WORLD_W, wy);
+                    } else {
+                        strokeLine(m_lastWorldPos.x(), m_lastWorldPos.y(), wx - WORLD_W, wy);
+                    }
+                }
+            } else {
+                m_bridge->paintAt(wx, wy);
+            }
+            m_lastWorldPos = QPoint(wx, wy);
+        }
         event->accept();
     }
 }
 
 void MapCanvasItem::mouseReleaseEvent(QMouseEvent* event)
 {
-    if (event->button() == Qt::RightButton || event->button() == Qt::MiddleButton) {
+    if (event->button() == Qt::RightButton || event->button() == Qt::MiddleButton ||
+        (event->button() == Qt::LeftButton && m_bridge && m_bridge->activeTool() == WorldEditorBridge::Hand)) {
         m_isPanning = false;
+        if (m_bridge && m_bridge->activeTool() == WorldEditorBridge::Hand) {
+            setCursor(Qt::OpenHandCursor);
+        } else {
+            setCursor(Qt::CrossCursor);
+        }
         event->accept();
     } else if (event->button() == Qt::LeftButton) {
         m_isPainting = false;
@@ -231,17 +374,24 @@ void MapCanvasItem::mouseReleaseEvent(QMouseEvent* event)
 void MapCanvasItem::wheelEvent(QWheelEvent* event)
 {
     QPointF mousePos = event->position();
-    QPointF worldBefore = screenToWorld(mousePos);
-
     qreal angle = event->angleDelta().y();
     qreal factor = (angle > 0) ? 1.2 : 0.83333;
 
+    qreal oldZoom = m_zoom;
     qreal newZoom = qBound(0.05, m_zoom * factor, 32.0);
-    if (!qFuzzyCompare(newZoom, m_zoom)) {
+    if (!qFuzzyCompare(newZoom, oldZoom)) {
+        qreal scaleRatio = newZoom / oldZoom;
+        m_panX = mousePos.x() - (mousePos.x() - m_panX) * scaleRatio;
+        m_panY = mousePos.y() - (mousePos.y() - m_panY) * scaleRatio;
         m_zoom = newZoom;
-        // Keep cursor position stable on zoom
-        m_panX = mousePos.x() - (worldBefore.x() * m_zoom);
-        m_panY = mousePos.y() - (worldBefore.y() * m_zoom);
+
+        qreal scaledW = WORLD_W * m_zoom;
+        if (scaledW > 0) {
+            while (m_panX > 0.0) m_panX -= scaledW;
+            while (m_panX <= -scaledW) m_panX += scaledW;
+        }
+
+        setPanY(m_panY);
 
         emit zoomChanged();
         emit panChanged();
@@ -249,6 +399,174 @@ void MapCanvasItem::wheelEvent(QWheelEvent* event)
     }
 
     event->accept();
+}
+
+void MapCanvasItem::touchEvent(QTouchEvent* event)
+{
+    const auto& points = event->points();
+    if (points.isEmpty()) {
+        QQuickPaintedItem::touchEvent(event);
+        return;
+    }
+
+    if (points.count() >= 2) {
+        // Multi-touch pinch & pan
+        m_isPainting = false;
+        m_isPanning = false;
+
+        QPointF p0 = points[0].position();
+        QPointF p1 = points[1].position();
+        qreal dist = QLineF(p0, p1).length();
+        QPointF mid = (p0 + p1) * 0.5;
+
+        if (!m_pinchActive || event->type() == QEvent::TouchBegin) {
+            m_pinchActive = true;
+            m_initialPinchDist = dist;
+            m_initialPinchZoom = m_zoom;
+            m_lastPinchMid = mid;
+        } else if (event->type() == QEvent::TouchUpdate) {
+            if (m_initialPinchDist > 8.0 && dist > 8.0) {
+                qreal factor = dist / m_initialPinchDist;
+                qreal targetZoom = qBound(0.05, m_initialPinchZoom * factor, 32.0);
+
+                // Zoom centered around the pinch midpoint
+                if (!qFuzzyCompare(targetZoom, m_zoom)) {
+                    qreal scaleRatio = targetZoom / m_zoom;
+                    m_panX = mid.x() - (mid.x() - m_panX) * scaleRatio;
+                    m_panY = mid.y() - (mid.y() - m_panY) * scaleRatio;
+                    m_zoom = targetZoom;
+                }
+
+                // Two-finger pan translation
+                QPointF deltaMid = mid - m_lastPinchMid;
+                m_panX += deltaMid.x();
+                m_panY += deltaMid.y();
+                m_lastPinchMid = mid;
+
+                qreal scaledW = WORLD_W * m_zoom;
+                if (scaledW > 0) {
+                    while (m_panX > 0.0) m_panX -= scaledW;
+                    while (m_panX <= -scaledW) m_panX += scaledW;
+                }
+                setPanY(m_panY);
+
+                emit zoomChanged();
+                emit panChanged();
+                update();
+            }
+        }
+        if (event->type() == QEvent::TouchEnd || event->type() == QEvent::TouchCancel) {
+            m_pinchActive = false;
+        }
+        event->accept();
+        return;
+    }
+
+    // Single-finger touch handling (pan or paint / fill / pick)
+    if (points.count() == 1) {
+        QPointF pos = points[0].position();
+
+        if (event->type() == QEvent::TouchBegin) {
+            m_pinchActive = false;
+            m_lastMousePos = pos;
+            bool isHand = (m_bridge && m_bridge->activeTool() == WorldEditorBridge::Hand);
+
+            if (isHand) {
+                m_isPanning = true;
+                event->accept();
+                return;
+            }
+
+            QPointF worldPosF = screenToWorld(pos);
+            if (isWorldPosValid(worldPosF) && m_bridge) {
+                int wx = (int)std::floor(worldPosF.x());
+                int wy = (int)std::floor(worldPosF.y());
+                int tool = m_bridge->activeTool();
+                if (tool == WorldEditorBridge::Fill) {
+                    m_bridge->fillAt(wx, wy);
+                } else if (tool == WorldEditorBridge::Picker) {
+                    m_bridge->pickAt(wx, wy);
+                } else {
+                    m_isPainting = true;
+                    m_lastWorldPos = QPoint(wx, wy);
+                    m_bridge->paintAt(wx, wy);
+                }
+                event->accept();
+                return;
+            }
+        } else if (event->type() == QEvent::TouchUpdate) {
+            QPointF delta = pos - m_lastMousePos;
+            m_lastMousePos = pos;
+
+            if (m_isPanning) {
+                m_panX += delta.x();
+                m_panY += delta.y();
+                qreal scaledW = WORLD_W * m_zoom;
+                if (scaledW > 0) {
+                    while (m_panX > 0.0) m_panX -= scaledW;
+                    while (m_panX <= -scaledW) m_panX += scaledW;
+                }
+                setPanY(m_panY);
+                emit panChanged();
+                update();
+                event->accept();
+                return;
+            }
+
+            QPointF worldPosF2 = screenToWorld(pos);
+            if (isWorldPosValid(worldPosF2)) {
+                int wx = (int)std::floor(worldPosF2.x());
+                int wy = (int)std::floor(worldPosF2.y());
+                emit cursorWorldCoordsChanged(wx, wy);
+                if (m_isPainting && m_bridge) {
+                    int dx = std::abs(wx - m_lastWorldPos.x());
+                    if (dx < WORLD_W / 2) {
+                        strokeLine(m_lastWorldPos.x(), m_lastWorldPos.y(), wx, wy);
+                    } else {
+                        if (m_lastWorldPos.x() > wx) {
+                            strokeLine(m_lastWorldPos.x(), m_lastWorldPos.y(), wx + WORLD_W, wy);
+                        } else {
+                            strokeLine(m_lastWorldPos.x(), m_lastWorldPos.y(), wx - WORLD_W, wy);
+                        }
+                    }
+                    m_lastWorldPos = QPoint(wx, wy);
+                }
+                event->accept();
+                return;
+            }
+        } else if (event->type() == QEvent::TouchEnd || event->type() == QEvent::TouchCancel) {
+            m_isPanning = false;
+            m_isPainting = false;
+            m_pinchActive = false;
+            event->accept();
+            return;
+        }
+    }
+
+    QQuickPaintedItem::touchEvent(event);
+}
+
+void MapCanvasItem::hoverEnterEvent(QHoverEvent* event)
+{
+    m_isHovering = true;
+    m_currentScreenPos = event->position();
+    update();
+}
+
+void MapCanvasItem::hoverMoveEvent(QHoverEvent* event)
+{
+    m_isHovering = true;
+    m_currentScreenPos = event->position();
+    QPointF worldPosF = screenToWorld(m_currentScreenPos);
+    emit cursorWorldCoordsChanged((int)std::floor(worldPosF.x()), (int)std::floor(worldPosF.y()));
+    update();
+}
+
+void MapCanvasItem::hoverLeaveEvent(QHoverEvent* event)
+{
+    Q_UNUSED(event);
+    m_isHovering = false;
+    update();
 }
 
 void MapCanvasItem::strokeLine(int x0, int y0, int x1, int y1)
@@ -268,7 +586,8 @@ void MapCanvasItem::strokeLine(int x0, int y0, int x1, int y1)
 
     while (true) {
         if (counter % step == 0) {
-            m_bridge->paintAt(currX, currY);
+            int wrappedX = ((currX % WORLD_W) + WORLD_W) % WORLD_W;
+            m_bridge->paintAt(wrappedX, currY);
         }
         counter++;
 

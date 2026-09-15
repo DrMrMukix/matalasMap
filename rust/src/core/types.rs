@@ -81,6 +81,7 @@ pub enum ToolType {
     Eraser = 1,
     Fill = 2,
     Picker = 3,
+    Hand = 4,
 }
 
 impl From<u32> for ToolType {
@@ -89,7 +90,8 @@ impl From<u32> for ToolType {
             0 => ToolType::Brush,
             1 => ToolType::Eraser,
             2 => ToolType::Fill,
-            _ => ToolType::Picker,
+            3 => ToolType::Picker,
+            _ => ToolType::Hand,
         }
     }
 }
